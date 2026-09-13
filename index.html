@@ -214,14 +214,53 @@
     .nav-item{white-space:nowrap;}
     #topbar,#content{padding-left:16px;padding-right:16px;}
   }
+
+  /* Login screen */
+  #loginScreen{
+    min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 30% 20%, #3A5949 0%, var(--forest-dark) 60%);
+    padding:20px;
+  }
+  .login-card{
+    background:var(--surface);border-radius:22px;padding:38px 34px;
+    width:100%;max-width:360px;text-align:center;box-shadow:var(--shadow);
+  }
+  .login-card h1{font-size:24px;margin-bottom:6px;}
+  .login-card p{color:var(--ink-soft);font-size:13.5px;margin-bottom:24px;}
+  .google-btn{
+    display:inline-flex;align-items:center;gap:10px;justify-content:center;
+    width:100%;padding:11px 16px;border-radius:999px;border:1px solid var(--border);
+    background:#fff;font-weight:600;font-size:14px;color:var(--ink);
+  }
+  .google-btn:hover{background:var(--bg-soft);}
+  #loginError{color:#9B4025;font-size:12.5px;margin-top:14px;min-height:16px;}
+
+  .user-box{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;gap:9px;}
+  .user-box img{width:28px;height:28px;border-radius:50%;flex-shrink:0;}
+  .user-box .u-email{font-size:11.5px;color:#CBD8C7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+  .user-box button{background:none;border:none;color:#A9BDB0;cursor:pointer;padding:4px;}
+  .user-box button:hover{color:#fff;}
 </style>
 </head>
 <body>
 
-<div id="shell">
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>Barák</h1>
+    <p>Správa rekonstrukce — přístup jen pro rodinu.</p>
+    <button class="google-btn" id="googleSignInBtn">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.5 5.5 29.6 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5 44.5 35.3 44.5 24c0-1.2-.1-2.4-.3-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.5 5.5 29.6 3.5 24 3.5c-7.6 0-14.1 4.3-17.5 10.6z"/><path fill="#4CAF50" d="M24 44.5c5.5 0 10.4-1.9 14.2-5.1l-6.6-5.4c-2 1.4-4.6 2.3-7.6 2.3-5.3 0-9.7-3.3-11.3-8l-6.6 5C9.9 40.2 16.4 44.5 24 44.5z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.3 5.6l6.6 5.4C41.4 35.6 44.5 30.3 44.5 24c0-1.2-.1-2.4-.3-3.5z"/></svg>
+      Přihlásit se přes Google
+    </button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<div id="shell" style="display:none;">
   <nav id="sidebar">
     <div class="brand">Barák<span>Správa rekonstrukce</span></div>
     <div id="navlist"></div>
+    <div class="user-box" id="userBox"></div>
   </nav>
   <div id="main">
     <div id="topbar"><h1 id="pagetitle">Dashboard</h1></div>
@@ -237,6 +276,9 @@ import {
   getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc,
   serverTimestamp, setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyANoWH1tc7UnCmPEKBTzdG76Z7aCe5LPE0",
@@ -252,6 +294,46 @@ function getDb(){ return getFirestore(app); }
 
 const CLOUD_NAME = "cm0oafid";
 const UPLOAD_PRESET = "rekonstrukce_upload";
+
+const ALLOWED_EMAILS = ["info@jakubhaluska.cz", "jancahaluskova@gmail.com"];
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+let dataInitialized = false;
+
+document.getElementById("googleSignInBtn").addEventListener("click", async ()=>{
+  document.getElementById("loginError").textContent = "";
+  try{
+    await signInWithPopup(auth, googleProvider);
+  }catch(err){
+    document.getElementById("loginError").textContent = "Přihlášení se nezdařilo: " + err.message;
+  }
+});
+
+onAuthStateChanged(auth, user=>{
+  if(user){
+    if(ALLOWED_EMAILS.includes(user.email)){
+      document.getElementById("loginScreen").style.display = "none";
+      document.getElementById("shell").style.display = "flex";
+      renderUserBox(user);
+      if(!dataInitialized){ dataInitialized = true; initData(); }
+    } else {
+      document.getElementById("loginError").textContent = `Účet ${user.email} nemá k appce přístup.`;
+      signOut(auth);
+    }
+  } else {
+    document.getElementById("shell").style.display = "none";
+    document.getElementById("loginScreen").style.display = "flex";
+  }
+});
+
+function renderUserBox(user){
+  document.getElementById("userBox").innerHTML = `
+    ${user.photoURL ? `<img src="${user.photoURL}" alt="">` : ''}
+    <span class="u-email">${esc(user.displayName || user.email)}</span>
+    <button id="logoutBtn" title="Odhlásit se">${ICO.x}</button>
+  `;
+  document.getElementById("logoutBtn").onclick = ()=> signOut(auth);
+}
 
 /* ---------- STATE ---------- */
 const state = {
@@ -326,7 +408,9 @@ function subscribe(col){
     console.error("Firestore chyba pro", col, err);
   });
 }
-["rooms","contacts","statusEntries","documents","financeCategories","financeItems","budgets","tasks","photos","materials","notes"].forEach(subscribe);
+function initData(){
+  ["rooms","contacts","statusEntries","documents","financeCategories","financeItems","budgets","tasks","photos","materials","notes"].forEach(subscribe);
+}
 
 let seeded = false;
 async function maybeSeedFinanceCategories(){
