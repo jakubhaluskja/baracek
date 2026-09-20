@@ -215,6 +215,18 @@ table.budget-table td{padding:9px 8px;border-bottom:1px solid var(--border);}
 
 ::placeholder{color:#B7AE9C;}
 
+/* Loading screen (shown briefly while auth resolves, before deciding login vs. app) */
+#loadingScreen{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);
+}
+.loading-spinner{
+  width:26px;height:26px;border-radius:50%;
+  border:3px solid var(--border);border-top-color:var(--forest);
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
 /* Login screen */
 #loginScreen{
   min-height:100vh;display:flex;align-items:center;justify-content:center;

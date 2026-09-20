@@ -777,7 +777,8 @@ function buildShellDOM(sectionId){
   const root = document.getElementById("app-root");
   const section = SECTIONS.find(s=>s.id===sectionId);
   root.innerHTML = `
-    <div id="loginScreen">
+    <div id="loadingScreen"><div class="loading-spinner"></div></div>
+    <div id="loginScreen" style="display:none;">
       <div class="login-card">
         <h1>Barák</h1>
         <p>Správa rekonstrukce — přístup jen pro rodinu.</p>
@@ -858,6 +859,7 @@ export function mountPage(sectionId){
   bindContentEvents(renderContent);
 
   onAuthStateChanged(auth, user=>{
+    document.getElementById("loadingScreen").style.display = "none";
     if(user){
       if(ALLOWED_EMAILS.includes(user.email)){
         document.getElementById("loginScreen").style.display = "none";
@@ -866,6 +868,7 @@ export function mountPage(sectionId){
         renderContent();
         if(!dataInitialized){ dataInitialized = true; initData(); }
       } else {
+        document.getElementById("loginScreen").style.display = "flex";
         document.getElementById("loginError").textContent = `Účet ${user.email} nemá k appce přístup.`;
         signOut(auth);
       }
