@@ -97,9 +97,26 @@ function fmtDoba(d){
   }
   return trimmed;
 }
+const DISPLAY_NAMES = {"info@jakubhaluska.cz":"Jakub", "jancahaluskova@gmail.com":"Jana"};
+function displayName(email){ return DISPLAY_NAMES[email] || email || ""; }
+function isOverdue(t){ return !!(t.dueDate && t.dueDate < todayISO() && t.status!=='hotovo'); }
+function financeItemName(id){ const f = byId(state.financeItems,id); return f ? f.name : null; }
+function warrantyStatus(dateStr){
+  if(!dateStr) return null;
+  const today = todayISO();
+  const in30 = new Date(); in30.setDate(in30.getDate()+30);
+  const in30ISO = in30.toISOString().slice(0,10);
+  if(dateStr < today) return "expired";
+  if(dateStr <= in30ISO) return "soon";
+  return "ok";
+}
 
 /* ---------- FIRESTORE CRUD ---------- */
-async function addItem(col, data){ return addDoc(collection(db,col), data); }
+async function addItem(col, data){
+  const payload = {...data};
+  if(auth.currentUser && auth.currentUser.email) payload.createdBy = auth.currentUser.email;
+  return addDoc(collection(db,col), payload);
+}
 async function updateItem(col, id, data){ return updateDoc(doc(db,col,id), data); }
 async function deleteItem(col, id){ return deleteDoc(doc(db,col,id)); }
 
@@ -244,10 +261,20 @@ function renderDashboard(){
   const upcoming = getUpcomingItems().slice(0,5);
   const openTasks = state.tasks.filter(t=>t.status!=='hotovo').length;
   const totalTasks = state.tasks.length;
+  const doneTasks = totalTasks - openTasks;
+  const pctDone = totalTasks>0 ? Math.round((doneTasks/totalTasks)*100) : 0;
+  const overdueTasks = state.tasks.filter(isOverdue);
   const now = new Date();
   const monthStr = now.toISOString().slice(0,7);
   const spentThisMonth = state.financeItems.filter(i=>(i.date||'').startsWith(monthStr) && i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
   const totalSpent = state.financeItems.filter(i=>i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
+  const overBudget = state.financeCategories.map(c=>{
+    const b = byId(state.budgets, c.id);
+    const planned = b ? (b.plannedAmount||0) : 0;
+    const spent = state.financeItems.filter(i=>i.categoryId===c.id && i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
+    return {c, planned, spent};
+  }).filter(r=>r.planned>0 && r.spent>r.planned);
+  const expiringWarranty = state.materials.filter(m=>m.warrantyUntil && warrantyStatus(m.warrantyUntil)!=='ok');
 
   return `
     <div class="hero-tile">
@@ -259,11 +286,21 @@ function renderDashboard(){
         <div class="hero-stat"><div class="num">${fmtMoney(spentThisMonth)}</div><div class="lbl">utraceno tento měsíc</div></div>
         <div class="hero-stat"><div class="num">${fmtMoney(totalSpent)}</div><div class="lbl">celkem utraceno</div></div>
       </div>
+      <div class="hero-progress">
+        <div class="row-between" style="margin-bottom:4px;"><span>Hotovo celkem</span><span>${pctDone}%</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pctDone}%;"></div></div>
+      </div>
       <div class="hero-next">
         <div class="hn-title">Nejbližší naplánované kroky</div>
         ${upcoming.length ? upcoming.map(u=>`<div class="hero-next-item"><span>${esc(u.title)}</span><span class="d">${fmtDateShort(u.date)}</span></div>`).join("") : `<div class="hero-next-item"><span>Žádné naplánované kroky</span></div>`}
       </div>
     </div>
+    ${(overBudget.length || overdueTasks.length || expiringWarranty.length) ? `
+    <div class="warn-banner">
+      ${overBudget.length ? `<div class="warn-row">⚠️ Přečerpaný rozpočet: ${overBudget.map(r=>`${esc(r.c.name)} (${fmtMoney(r.spent)} / ${fmtMoney(r.planned)})`).join(', ')}</div>` : ''}
+      ${overdueTasks.length ? `<div class="warn-row">⏰ ${overdueTasks.length} zpožděných úkolů: ${overdueTasks.map(t=>esc(t.title)).slice(0,3).join(', ')}${overdueTasks.length>3?'…':''}</div>` : ''}
+      ${expiringWarranty.length ? `<div class="warn-row">🛡️ Záruka: ${expiringWarranty.map(m=>`${esc(m.name)} (${warrantyStatus(m.warrantyUntil)==='expired'?'prošlá':'brzy končí'})`).join(', ')}</div>` : ''}
+    </div>` : ''}
     <div class="grid grid-2">
       <div class="card">
         <h3 style="margin-bottom:10px;font-size:16px;">Poslední záznamy ve Stavu</h3>
@@ -280,9 +317,10 @@ function renderDashboard(){
         ${state.tasks.filter(t=>t.status!=='hotovo').slice().sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,4).map(t=>`
           <div class="list-item" style="padding:10px 0;">
             <div class="item-main">
-              <div class="item-title">${esc(t.title)}</div>
+              <div class="item-title" style="${isOverdue(t)?'color:var(--danger);':''}">${esc(t.title)}</div>
               <div class="item-meta">${t.dueDate?fmtDateShort(t.dueDate):'bez termínu'}${t.assigneeId&&contactName(t.assigneeId)?` · ${contactName(t.assigneeId)}`:''}</div>
             </div>
+            ${isOverdue(t)?`<span class="badge status-zpozdeno">Zpožděno</span>`:''}
             <span class="badge status-${t.status}">${statusLabel(t.status)}</span>
           </div>`).join("") || `<div class="empty-state">Žádné otevřené úkoly</div>`}
       </div>
@@ -322,6 +360,7 @@ function renderStav(){
                     ${e.kdo?`<span>${e.doba?' · ':''}Pomáhal: ${esc(e.kdo)}</span>`:''}
                     ${e.typ?`<span>${(e.doba||e.kdo)?' · ':''}${esc(e.typ)}</span>`:''}
                     ${e.roomId&&roomName(e.roomId)?`<span>${(e.doba||e.kdo||e.typ)?' · ':''}<span class="room-tag">${roomName(e.roomId)}</span></span>`:''}
+                    ${e.createdBy?`<span> · Přidal: ${esc(displayName(e.createdBy))}</span>`:''}
                   </div>
                 </div>
                 <div class="item-actions">
@@ -367,6 +406,7 @@ function renderDokumenty(){
           <div class="item-main">
             <div class="item-title"><a href="${d.file}" target="_blank" rel="noopener">${esc(d.name)}</a></div>
             <div class="item-meta">${d.category?esc(d.category)+' · ':''}vloženo ${fmtDateTime(d.createdAt)}${d.updatedAt?` · upraveno ${fmtDateTime(d.updatedAt)}`:''}</div>
+            <div class="item-meta">${d.supplierId&&contactName(d.supplierId)?`Dodavatel: ${contactName(d.supplierId)}`:''}${d.financeItemId&&financeItemName(d.financeItemId)?`${d.supplierId&&contactName(d.supplierId)?' · ':''}Platba: ${financeItemName(d.financeItemId)}`:''}</div>
           </div>
           <div class="item-actions">
             <button class="icon-btn" data-action="edit-doc" data-id="${d.id}">${ICO.edit}</button>
@@ -384,10 +424,15 @@ function docCatFilterChips(){
     ${DOC_KATEGORIE.map(k=>`<span class="chip clickable ${docCatFilter===k?'active':''}" data-action="doc-filter" data-cat="${k}">${k}</span>`).join("")}
   </div>`;
 }
+const financeItemOptions = ()=> state.financeItems
+  .slice().sort((a,b)=> (b.date||'').localeCompare(a.date||''))
+  .map(f=>({value:f.id,label:`${fmtDateShort(f.date)} — ${(f.name||'').slice(0,40)}`}));
 function docFields(existing){
   return [
     {key:"name", label:"Název dokumentu", type:"text", required:true},
     {key:"category", label:"Kategorie", type:"select", allowEmpty:true, options:DOC_KATEGORIE.map(k=>({value:k,label:k}))},
+    {key:"supplierId", label:"Dodavatel / kontakt", type:"select", allowEmpty:true, options:contactOptions},
+    {key:"financeItemId", label:"Propojit s položkou ve Financích", type:"select", allowEmpty:true, options:financeItemOptions},
     {key:"file", label:"Soubor", type:"file", accept:".pdf,image/*,.doc,.docx", required: !existing},
   ];
 }
@@ -408,7 +453,9 @@ function renderFinance(){
     <div class="toolbar">
       <button class="btn btn-primary" data-action="add-finance">${ICO.plus} Přidat položku</button>
       <button class="btn btn-ghost" data-action="add-cat">${ICO.plus} Nová kategorie</button>
+      <button class="btn btn-ghost" data-action="export-csv">⬇ Export CSV</button>
     </div>
+    ${renderFinanceChart()}
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
       <span class="chip clickable ${!financeFilterCat?'active':''}" data-action="fin-filter" data-cat="">Vše</span>
       ${state.financeCategories.map(c=>`
@@ -428,7 +475,7 @@ function renderFinance(){
           <div class="doc-icon" style="font-size:16px;">${cat&&cat.icon?cat.icon:'💰'}</div>
           <div class="item-main">
             <div class="item-title">${esc(i.name||'Položka')}</div>
-            <div class="item-meta">${fmtDateShort(i.date)}${cat?` · ${esc(cat.name)}`:''}</div>
+            <div class="item-meta">${fmtDateShort(i.date)}${cat?` · ${esc(cat.name)}`:''}${i.supplierId&&contactName(i.supplierId)?` · ${contactName(i.supplierId)}`:''}${i.createdBy?` · ${esc(displayName(i.createdBy))}`:''}</div>
             ${i.note?`<div class="item-meta" style="margin-top:2px;">${esc(i.note)}</div>`:''}
           </div>
           <div style="text-align:right;">
@@ -442,6 +489,50 @@ function renderFinance(){
       }).join("") : `<div class="empty-state">Žádné položky v této kategorii.</div>`}
     </div>
   `;
+}
+function renderFinanceChart(){
+  const byCat = {};
+  state.financeItems.filter(i=>i.type==='vydaj').forEach(i=>{
+    const key = i.categoryId || "__none";
+    byCat[key] = (byCat[key]||0) + Math.abs(i.amount||0);
+  });
+  const rows = Object.keys(byCat).map(k=>{
+    const cat = k==="__none" ? null : catObj(k);
+    return {label: cat ? `${cat.icon||''} ${cat.name}` : "Bez kategorie", color: cat ? cat.color : "#9a9284", val: byCat[k]};
+  }).sort((a,b)=>b.val-a.val);
+  const max = Math.max(1, ...rows.map(r=>r.val));
+  if(!rows.length) return "";
+  return `
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:10px;font-size:15px;">Výdaje podle kategorie</h3>
+      <div class="chart-bars">
+        ${rows.map(r=>`
+          <div class="chart-row">
+            <div class="chart-label">${esc(r.label)}</div>
+            <div class="chart-track"><div class="chart-fill" style="width:${(r.val/max)*100}%;background:${r.color};"></div></div>
+            <div class="chart-val">${fmtMoney(r.val)}</div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+function exportFinanceCSV(){
+  const rows = [["Název","Datum","Typ","Částka","Kategorie","Dodavatel","Místnost","Poznámka"]];
+  state.financeItems.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(i=>{
+    const cat = catObj(i.categoryId);
+    rows.push([
+      i.name||"", i.date||"", i.type==='vydaj'?'Výdaj':'Příjem', String(i.amount||0),
+      cat?cat.name:"", contactName(i.supplierId)||"", roomName(i.roomId)||"", i.note||""
+    ]);
+  });
+  const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\r\n");
+  const blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `finance-export-${todayISO()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 function financeFields(){
   return [
@@ -546,9 +637,10 @@ function renderUkoly(){
         <div class="list-item">
           <button class="task-check ${t.status==='hotovo'?'checked':''}" data-action="toggle-task" data-id="${t.id}" title="${t.status==='hotovo'?'Označit jako nehotové':'Označit jako hotové'}">${t.status==='hotovo'?ICO.check:''}</button>
           <div class="item-main">
-            <div class="item-title" style="${t.status==='hotovo'?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(t.title)}</div>
-            <div class="item-meta">${t.dueDate?fmtDate(t.dueDate):'bez termínu'}${t.assigneeId&&contactName(t.assigneeId)?` · ${contactName(t.assigneeId)}`:''}${t.roomId&&roomName(t.roomId)?` · ${roomName(t.roomId)}`:''}</div>
+            <div class="item-title" style="${t.status==='hotovo'?'text-decoration:line-through;color:var(--ink-soft);':(isOverdue(t)?'color:var(--danger);':'')}">${esc(t.title)}</div>
+            <div class="item-meta">${t.dueDate?fmtDate(t.dueDate):'bez termínu'}${t.assigneeId&&contactName(t.assigneeId)?` · ${contactName(t.assigneeId)}`:''}${t.roomId&&roomName(t.roomId)?` · ${roomName(t.roomId)}`:''}${t.createdBy?` · ${esc(displayName(t.createdBy))}`:''}</div>
           </div>
+          ${isOverdue(t)?`<span class="badge status-zpozdeno">Zpožděno</span>`:''}
           <span class="badge status-${t.status}">${statusLabel(t.status)}</span>
           <div class="item-actions">
             <button class="icon-btn" data-action="edit-task" data-id="${t.id}">${ICO.edit}</button>
@@ -570,6 +662,7 @@ function taskFields(){
 }
 
 /* ================= FOTOGALERIE ================= */
+const FAZE_OPTIONS = ["Před","Během","Po"];
 function renderFotogalerie(){
   const sorted = state.photos.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   return `
@@ -581,7 +674,7 @@ function renderFotogalerie(){
           <img class="thumb" src="${p.file}" alt="${esc(p.caption||'')}">
           <div class="pc-body">
             <div class="item-title" style="font-size:13px;">${esc(p.caption||'Bez popisu')}</div>
-            <div class="item-meta">${p.date?fmtDateShort(p.date):''}${p.roomId&&roomName(p.roomId)?` · ${roomName(p.roomId)}`:''}</div>
+            <div class="item-meta">${p.date?fmtDateShort(p.date):''}${p.roomId&&roomName(p.roomId)?` · ${roomName(p.roomId)}`:''}${p.faze?` · <span class="chip">${esc(p.faze)}</span>`:''}</div>
             <div class="item-actions" style="margin-top:6px;">
               <button class="icon-btn" data-action="edit-photo" data-id="${p.id}">${ICO.edit}</button>
               <button class="icon-btn" data-action="del-photo" data-id="${p.id}">${ICO.trash}</button>
@@ -598,6 +691,7 @@ function photoFields(existing){
     {key:"caption", label:"Popisek", type:"text"},
     {key:"date", label:"Datum", type:"date", default:todayISO()},
     {key:"roomId", label:"Místnost", type:"select", allowEmpty:true, options:roomOptions},
+    {key:"faze", label:"Fáze", type:"select", allowEmpty:true, options:FAZE_OPTIONS.map(f=>({value:f,label:f}))},
     {key:"statusEntryId", label:"Propojit se záznamem ve Stavu", type:"select", allowEmpty:true, options:statusEntryOptions},
   ];
 }
@@ -613,13 +707,14 @@ function renderMistnosti(){
         return `
         <div class="card">
           <div class="row-between">
-            <div class="item-title">${esc(r.name)}</div>
+            <a class="item-title" href="mistnost.html?id=${r.id}" style="text-decoration:none;color:inherit;">${esc(r.name)}</a>
             <div class="item-actions">
               <button class="icon-btn" data-action="edit-room" data-id="${r.id}">${ICO.edit}</button>
               <button class="icon-btn" data-action="del-room" data-id="${r.id}">${ICO.trash}</button>
             </div>
           </div>
           <div class="item-meta" style="margin-top:6px;">${r.notes?esc(r.notes)+' · ':''}${n} propojených záznamů</div>
+          <a class="link-inline" href="mistnost.html?id=${r.id}" style="display:inline-block;margin-top:8px;">zobrazit detail →</a>
         </div>`;
       }).join("") : `<div class="empty-state">Zatím žádné místnosti. Přidej např. Kuchyň, Koupelna, Ložnice…</div>`}
     </div>
@@ -633,10 +728,47 @@ function roomFields(){
 }
 
 /* ================= KALENDÁŘ ================= */
+let calendarMonth = null; // "YYYY-MM", null = current
 function renderKalendar(){
   const items = getUpcomingItems();
+  const monthStr = calendarMonth || todayISO().slice(0,7);
+  const [y,m] = monthStr.split("-").map(Number);
+  const firstOfMonth = new Date(y, m-1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startWeekday = (firstOfMonth.getDay()+6)%7; // Monday=0
+  const byDay = {};
+  items.forEach(i=>{ (byDay[i.date] = byDay[i.date]||[]).push(i); });
+  const monthLabel = firstOfMonth.toLocaleDateString('cs-CZ',{month:'long',year:'numeric'});
+  const prevMonth = new Date(y, m-2, 1).toISOString().slice(0,7);
+  const nextMonth = new Date(y, m, 1).toISOString().slice(0,7);
+  const todayStr = todayISO();
+
+  let cells = "";
+  for(let i=0;i<startWeekday;i++) cells += `<div class="cal-cell empty"></div>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const dateStr = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayItems = byDay[dateStr]||[];
+    cells += `
+      <div class="cal-cell ${dateStr===todayStr?'today':''}">
+        <div class="cal-daynum">${d}</div>
+        ${dayItems.slice(0,3).map(i=>`<div class="cal-dot" title="${esc(i.title)}">${esc(i.title)}</div>`).join("")}
+        ${dayItems.length>3?`<div class="cal-more">+${dayItems.length-3}</div>`:''}
+      </div>`;
+  }
+
   return `
     <div class="section-lead">Automatický přehled sestavený z plánovaných kroků (Stav) a termínů úkolů.</div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row-between" style="margin-bottom:12px;">
+        <button class="btn btn-ghost" data-action="cal-prev" data-month="${prevMonth}">← Předchozí</button>
+        <h3 style="text-transform:capitalize;">${monthLabel}</h3>
+        <button class="btn btn-ghost" data-action="cal-next" data-month="${nextMonth}">Další →</button>
+      </div>
+      <div class="cal-grid cal-head">
+        <div>Po</div><div>Út</div><div>St</div><div>Čt</div><div>Pá</div><div>So</div><div>Ne</div>
+      </div>
+      <div class="cal-grid">${cells}</div>
+    </div>
     <div class="card">
       ${items.length ? items.map(i=>`
         <div class="list-item" style="padding:12px 4px;">
@@ -659,6 +791,7 @@ function renderMaterialy(){
           <div class="item-main">
             <div class="item-title" style="${m.bought?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(m.name)}</div>
             <div class="item-meta">${m.quantity?esc(m.quantity)+' · ':''}${m.price?fmtMoney(m.price)+' · ':''}${m.roomId&&roomName(m.roomId)?roomName(m.roomId):''}</div>
+            ${m.warrantyUntil?`<div class="item-meta">Záruka do ${fmtDateShort(m.warrantyUntil)} ${warrantyStatus(m.warrantyUntil)==='expired'?'<span class=\"badge status-zpozdeno\">Prošlá</span>':warrantyStatus(m.warrantyUntil)==='soon'?'<span class=\"badge status-probiha\">Brzy končí</span>':''}</div>`:''}
           </div>
           <span class="badge ${m.bought?'status-hotovo':'status-ceka'}">${m.bought?'Koupeno':'K nákupu'}</span>
           <div class="item-actions">
@@ -677,6 +810,7 @@ function materialFields(){
     {key:"price", label:"Cena", type:"number"},
     {key:"categoryId", label:"Kategorie (pro Finance)", type:"select", allowEmpty:true, options:financeCatOptions},
     {key:"roomId", label:"Místnost", type:"select", allowEmpty:true, options:roomOptions},
+    {key:"warrantyUntil", label:"Záruka do", type:"date"},
     {key:"bought", label:"Koupeno", type:"checkbox"},
   ];
 }
@@ -716,11 +850,92 @@ function noteFields(){
   ];
 }
 
+/* ================= MÍSTNOST DETAIL ================= */
+function renderMistnostDetail(){
+  const params = new URLSearchParams(location.search);
+  const id = params.get("id");
+  const room = byId(state.rooms, id);
+  if(!room) return `<div class="empty-state">Místnost nenalezena. <a class="link-inline" href="mistnosti.html">Zpět na Místnosti</a></div>`;
+  const stavItems = state.statusEntries.filter(s=>s.roomId===id).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const financeI = state.financeItems.filter(i=>i.roomId===id).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const taskItems = state.tasks.filter(t=>t.roomId===id);
+  const photoItems = state.photos.filter(p=>p.roomId===id);
+  const spent = financeI.filter(i=>i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
+  return `
+    <div class="section-lead"><a class="link-inline" href="mistnosti.html">← Zpět na Místnosti</a></div>
+    <div class="hero-tile">
+      <div class="eyebrow">MÍSTNOST</div>
+      <h2>${esc(room.name)}</h2>
+      ${room.notes?`<div class="sub">${esc(room.notes)}</div>`:''}
+      <div class="hero-stats">
+        <div class="hero-stat"><div class="num">${stavItems.length}</div><div class="lbl">záznamů ve Stavu</div></div>
+        <div class="hero-stat"><div class="num">${fmtMoney(spent)}</div><div class="lbl">utraceno</div></div>
+        <div class="hero-stat"><div class="num">${taskItems.filter(t=>t.status!=='hotovo').length}/${taskItems.length}</div><div class="lbl">otevřených úkolů</div></div>
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3 style="margin-bottom:10px;font-size:16px;">Stav</h3>
+        ${stavItems.length ? stavItems.map(e=>`<div class="list-item" style="padding:8px 0;"><div class="item-main"><div class="item-title">${esc(e.popis)}</div><div class="item-meta">${fmtDateShort(e.date)}</div></div></div>`).join("") : `<div class="empty-state">Žádné záznamy</div>`}
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:10px;font-size:16px;">Finance</h3>
+        ${financeI.length ? financeI.map(i=>`<div class="list-item" style="padding:8px 0;"><div class="item-main"><div class="item-title">${esc(i.name)}</div><div class="item-meta">${fmtDateShort(i.date)}</div></div><div class="${i.type==='vydaj'?'amount-neg':'amount-pos'}">${i.type==='vydaj'?'−':'+'}${fmtMoney(Math.abs(i.amount||0))}</div></div>`).join("") : `<div class="empty-state">Žádné položky</div>`}
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:10px;font-size:16px;">Úkoly</h3>
+        ${taskItems.length ? taskItems.map(t=>`<div class="list-item" style="padding:8px 0;"><div class="item-main"><div class="item-title">${esc(t.title)}</div></div><span class="badge status-${t.status}">${statusLabel(t.status)}</span></div>`).join("") : `<div class="empty-state">Žádné úkoly</div>`}
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:10px;font-size:16px;">Fotky</h3>
+        <div class="photo-grid">
+          ${photoItems.length ? photoItems.map(p=>`<div class="photo-card"><img class="thumb" src="${p.file}"></div>`).join("") : `<div class="empty-state">Žádné fotky</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ================= HLEDAT (SEARCH) ================= */
+let searchQuery = "";
+function renderHledat(){
+  const q = searchQuery.trim().toLowerCase();
+  function match(str){ return str && String(str).toLowerCase().includes(q); }
+  let results = [];
+  if(q){
+    state.statusEntries.forEach(e=>{ if(match(e.popis)||match(e.typ)) results.push({type:"Stav", title:e.popis, meta:fmtDateShort(e.date), href:"stav.html"}); });
+    state.financeItems.forEach(i=>{ if(match(i.name)||match(i.note)) results.push({type:"Finance", title:i.name, meta:fmtMoney(i.amount)+" · "+fmtDateShort(i.date), href:"finance.html"}); });
+    state.tasks.forEach(t=>{ if(match(t.title)) results.push({type:"Úkoly", title:t.title, meta:statusLabel(t.status), href:"ukoly.html"}); });
+    state.documents.forEach(d=>{ if(match(d.name)||match(d.category)) results.push({type:"Dokumenty", title:d.name, meta:d.category||"", href:"dokumenty.html"}); });
+    state.contacts.forEach(c=>{ if(match(c.name)||match(c.field)) results.push({type:"Kontakty", title:c.name, meta:c.field||"", href:"kontakty.html"}); });
+    state.notes.forEach(n=>{ if(match(n.title)||match(n.text)) results.push({type:"Poznámky", title:n.title||"Poznámka", meta:"", href:"poznamky.html"}); });
+    state.materials.forEach(m=>{ if(match(m.name)) results.push({type:"Materiály", title:m.name, meta:m.bought?"Koupeno":"K nákupu", href:"materialy.html"}); });
+    state.rooms.forEach(r=>{ if(match(r.name)||match(r.notes)) results.push({type:"Místnosti", title:r.name, meta:"", href:`mistnost.html?id=${r.id}`}); });
+  }
+  return `
+    <div class="section-lead">Hledej napříč celou appkou — Stav, Finance, Úkoly, Dokumenty, Kontakty, Poznámky, Materiály i Místnosti.</div>
+    <div class="card" style="margin-bottom:16px;">
+      <input type="text" id="searchInput" placeholder="Co hledáš?" value="${esc(searchQuery)}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:15px;">
+    </div>
+    ${q ? `<div class="card">
+      ${results.length ? results.map(r=>`
+        <div class="list-item">
+          <div class="item-main">
+            <div class="item-title"><a class="link-inline" href="${r.href}">${esc(r.title||'')}</a></div>
+            <div class="item-meta">${esc(r.type)}${r.meta?' · '+esc(r.meta):''}</div>
+          </div>
+        </div>
+      `).join("") : `<div class="empty-state">Žádné výsledky pro „${esc(searchQuery)}"</div>`}
+    </div>` : `<div class="empty-state">Začni psát pro vyhledávání.</div>`}
+  `;
+}
+
 const RENDERERS = {
   dashboard: renderDashboard, stav: renderStav, dokumenty: renderDokumenty,
   finance: renderFinance, rozpocet: renderRozpocet, kontakty: renderKontakty,
   ukoly: renderUkoly, fotogalerie: renderFotogalerie, mistnosti: renderMistnosti,
-  kalendar: renderKalendar, materialy: renderMaterialy, poznamky: renderPoznamky
+  kalendar: renderKalendar, materialy: renderMaterialy, poznamky: renderPoznamky,
+  mistnost: renderMistnostDetail, hledat: renderHledat
 };
 
 /* ================= EVENT BINDING (delegated on #content) ================= */
@@ -745,6 +960,7 @@ function bindContentEvents(rerender){
     if(action==="edit-finance") return openForm({title:"Upravit položku", fields:financeFields(), existing:byId(state.financeItems,id), onSubmit: d=>updateItem("financeItems", id, d)});
     if(action==="del-finance") return confirmDelete("Smazat tuto položku?", ()=>deleteItem("financeItems", id));
     if(action==="fin-filter"){ financeFilterCat = t.dataset.cat || null; return rerender(); }
+    if(action==="export-csv"){ return exportFinanceCSV(); }
     if(action==="add-cat") return openForm({title:"Nová kategorie", fields:catFields(), onSubmit: d=>addItem("financeCategories", d)});
     if(action==="edit-cat"){ e.stopPropagation(); return openForm({title:"Upravit kategorii", fields:catFields(), existing:catObj(id), onSubmit: d=>updateItem("financeCategories", id, d)}); }
     if(action==="del-cat"){ e.stopPropagation(); return confirmDelete("Smazat tuto kategorii?", ()=>deleteItem("financeCategories", id)); }
@@ -776,6 +992,8 @@ function bindContentEvents(rerender){
     if(action==="add-note") return openForm({title:"Nová poznámka", fields:noteFields(), onSubmit: d=>addItem("notes", d)});
     if(action==="edit-note") return openForm({title:"Upravit poznámku", fields:noteFields(), existing:byId(state.notes,id), onSubmit: d=>updateItem("notes", id, d)});
     if(action==="del-note") return confirmDelete("Smazat tuto poznámku?", ()=>deleteItem("notes", id));
+
+    if(action==="cal-prev" || action==="cal-next"){ calendarMonth = t.dataset.month; return rerender(); }
   };
 
   c.onchange = async (e)=>{
@@ -785,6 +1003,10 @@ function bindContentEvents(rerender){
       const val = parseFloat(t.value)||0;
       await setDoc(doc(db,"budgets",catId), {plannedAmount: val}, {merge:true});
     }
+  };
+
+  c.oninput = (e)=>{
+    if(e.target.id==="searchInput"){ searchQuery = e.target.value; rerender(); setTimeout(()=>{ const el=document.getElementById("searchInput"); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } },0); }
   };
 }
 
@@ -807,9 +1029,12 @@ async function handleMaterialSave(data, id){
 }
 
 /* ================= PAGE SHELL / MOUNT ================= */
+const PAGE_TITLES = { mistnost: "Detail místnosti", hledat: "Hledat" };
+const NAV_ACTIVE_OVERRIDE = { mistnost: "mistnosti" };
 function buildShellDOM(sectionId){
   const root = document.getElementById("app-root");
-  const section = SECTIONS.find(s=>s.id===sectionId);
+  const section = SECTIONS.find(s=>s.id===sectionId) || {label: PAGE_TITLES[sectionId] || sectionId};
+  const activeNavId = NAV_ACTIVE_OVERRIDE[sectionId] || sectionId;
   root.innerHTML = `
     <div id="loadingScreen"><div class="loading-spinner"></div></div>
     <div id="loginScreen" style="display:none;">
@@ -849,8 +1074,10 @@ function buildShellDOM(sectionId){
   `;
 
   document.getElementById("navlist").innerHTML = SECTIONS.map(s=>`
-    <a class="nav-item ${s.id===sectionId?'active':''}" href="${s.href}">${ICO[s.id]}<span>${s.label}</span></a>
-  `).join("");
+    <a class="nav-item ${s.id===activeNavId?'active':''}" href="${s.href}">${ICO[s.id]}<span>${s.label}</span></a>
+  `).join("") + `
+    <a class="nav-item ${sectionId==='hledat'?'active':''}" href="hledat.html"><span style="font-size:18px;line-height:1;">🔎</span><span>Hledat</span></a>
+  `;
 
   // Mobile drawer toggle
   const sidebarEl = document.getElementById("sidebar");
