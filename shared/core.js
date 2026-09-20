@@ -292,20 +292,38 @@ function renderStav(){
     <div class="toolbar">
       <button class="btn btn-primary" data-action="add-stav">${ICO.plus} Přidat záznam</button>
     </div>
-    <div class="card">
-      ${sorted.length ? sorted.map(e=>`
-        <div class="list-item">
-          <div class="item-main">
-            <div class="item-title">${esc(e.popis)} ${e.planned?'<span class="badge status-probiha">Plánováno</span>':''}</div>
-            <div class="item-meta">${fmtDate(e.date)}${e.doba?` · ${esc(e.doba)}`:''}${e.kdo?` · ${esc(e.kdo)}`:''}${e.typ?` · ${esc(e.typ)}`:''}${e.roomId&&roomName(e.roomId)?` · <span class="room-tag">${roomName(e.roomId)}</span>`:''}</div>
+    ${sorted.length ? `
+    <div class="timeline">
+      ${sorted.map((e,idx)=>`
+        <div class="timeline-item">
+          <div class="timeline-marker">
+            <div class="timeline-dot ${e.planned?'planned':''}"></div>
+            ${idx<sorted.length-1?'<div class="timeline-line"></div>':''}
           </div>
-          <div class="item-actions">
-            <button class="icon-btn" data-action="edit-stav" data-id="${e.id}">${ICO.edit}</button>
-            <button class="icon-btn" data-action="del-stav" data-id="${e.id}">${ICO.trash}</button>
+          <div class="timeline-body">
+            <div class="timeline-date">${fmtDate(e.date)} ${e.planned?'<span class="badge status-probiha">Plánováno</span>':''}</div>
+            <div class="card timeline-card">
+              <div class="row-between">
+                <div class="item-main">
+                  <div class="item-title">${esc(e.popis)}</div>
+                  <div class="item-meta" style="margin-top:6px;">
+                    ${e.doba?`<span>Délka: ${esc(e.doba)}</span>`:''}
+                    ${e.kdo?`<span>${e.doba?' · ':''}Pomáhal: ${esc(e.kdo)}</span>`:''}
+                    ${e.typ?`<span>${(e.doba||e.kdo)?' · ':''}${esc(e.typ)}</span>`:''}
+                    ${e.roomId&&roomName(e.roomId)?`<span>${(e.doba||e.kdo||e.typ)?' · ':''}<span class="room-tag">${roomName(e.roomId)}</span></span>`:''}
+                  </div>
+                </div>
+                <div class="item-actions">
+                  <button class="icon-btn" data-action="edit-stav" data-id="${e.id}">${ICO.edit}</button>
+                  <button class="icon-btn" data-action="del-stav" data-id="${e.id}">${ICO.trash}</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      `).join("") : `<div class="empty-state">Zatím žádné záznamy. Přidej první krok rekonstrukce.</div>`}
+      `).join("")}
     </div>
+    ` : `<div class="empty-state">Zatím žádné záznamy. Přidej první krok rekonstrukce.</div>`}
   `;
 }
 const STAV_TYPY = ["Stavební práce","Elektrika","Voda a topení","Jednání s úřadem","Nákup materiálu","Úklid","Jiné"];

@@ -194,6 +194,21 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 
 .room-tag{font-size:11.5px;color:var(--forest);font-weight:600;}
 
+/* Timeline (Stav) */
+.timeline{display:flex;flex-direction:column;}
+.timeline-item{display:flex;gap:16px;}
+.timeline-marker{display:flex;flex-direction:column;align-items:center;width:14px;flex-shrink:0;padding-top:8px;}
+.timeline-dot{width:13px;height:13px;border-radius:50%;background:var(--forest);border:2px solid var(--surface);box-shadow:0 0 0 2px var(--forest);flex-shrink:0;}
+.timeline-dot.planned{background:var(--surface);box-shadow:0 0 0 2px var(--sage);}
+.timeline-line{width:2px;flex:1;background:var(--border);margin:4px 0;min-height:20px;}
+.timeline-body{flex:1;min-width:0;padding-bottom:22px;}
+.timeline-date{
+  font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:var(--forest-dark);
+  margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.timeline-card{padding:14px 16px;}
+.timeline-card .item-meta span{white-space:nowrap;}
+
 img.thumb{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--radius-md);display:block;background:var(--bg-soft);}
 .photo-card{border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--surface);}
 .photo-card .pc-body{padding:9px 11px;}
