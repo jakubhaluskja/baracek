@@ -56,8 +56,9 @@ const ICO = {
   trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
   x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   menu:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>',
 };
-const CAT_ICONS = ["🔨","🧱","⚡","🚰","🎨","📦","🏠","💡","🪑","🧰","🌿","💶","🪟","🚪"];
+const CAT_ICONS = ["🔨","🧱","⚡","🚰","🎨","📦","🏠","💡","🪑","🧰","🌿","💶","🪟","🚪","🛋️","🚿","🛁","🧽","🪣","🧴","🔌","🪛","🪚","🔧","🧯","🚽","🏗️","🧾","📐","🖌️","🪵","🌡️","🔥","🛏️","🌳","🧹","🗑️","📺","🧺","🔑","🪜","🧵","🖼️","💧"];
 
 export const SECTIONS = [
   {id:"dashboard", label:"Dashboard", href:"dashboard.html"},
@@ -86,6 +87,16 @@ function roomName(id){ const r = byId(state.rooms,id); return r ? r.name : null;
 function contactName(id){ const c = byId(state.contacts,id); return c ? c.name : null; }
 function catObj(id){ return byId(state.financeCategories,id); }
 function statusLabel(s){ return s==='hotovo'?'Hotovo':s==='probiha'?'Probíhá':'Čeká'; }
+function fmtDoba(d){
+  if(!d) return "";
+  const trimmed = String(d).trim();
+  if(/^\d+([.,]\d+)?$/.test(trimmed)){
+    const num = trimmed.replace(',', '.');
+    const n = parseFloat(num);
+    return `${trimmed} ${n===1?'hodina':(n>=2&&n<=4?'hodiny':'hodin')}`;
+  }
+  return trimmed;
+}
 
 /* ---------- FIRESTORE CRUD ---------- */
 async function addItem(col, data){ return addDoc(collection(db,col), data); }
@@ -307,7 +318,7 @@ function renderStav(){
                 <div class="item-main">
                   <div class="item-title">${esc(e.popis)}</div>
                   <div class="item-meta" style="margin-top:6px;">
-                    ${e.doba?`<span>Délka: ${esc(e.doba)}</span>`:''}
+                    ${e.doba?`<span>Délka: ${esc(fmtDoba(e.doba))}</span>`:''}
                     ${e.kdo?`<span>${e.doba?' · ':''}Pomáhal: ${esc(e.kdo)}</span>`:''}
                     ${e.typ?`<span>${(e.doba||e.kdo)?' · ':''}${esc(e.typ)}</span>`:''}
                     ${e.roomId&&roomName(e.roomId)?`<span>${(e.doba||e.kdo||e.typ)?' · ':''}<span class="room-tag">${roomName(e.roomId)}</span></span>`:''}
@@ -533,8 +544,9 @@ function renderUkoly(){
     <div class="card">
       ${sorted.length ? sorted.map(t=>`
         <div class="list-item">
+          <button class="task-check ${t.status==='hotovo'?'checked':''}" data-action="toggle-task" data-id="${t.id}" title="${t.status==='hotovo'?'Označit jako nehotové':'Označit jako hotové'}">${t.status==='hotovo'?ICO.check:''}</button>
           <div class="item-main">
-            <div class="item-title">${esc(t.title)}</div>
+            <div class="item-title" style="${t.status==='hotovo'?'text-decoration:line-through;color:var(--ink-soft);':''}">${esc(t.title)}</div>
             <div class="item-meta">${t.dueDate?fmtDate(t.dueDate):'bez termínu'}${t.assigneeId&&contactName(t.assigneeId)?` · ${contactName(t.assigneeId)}`:''}${t.roomId&&roomName(t.roomId)?` · ${roomName(t.roomId)}`:''}</div>
           </div>
           <span class="badge status-${t.status}">${statusLabel(t.status)}</span>
@@ -744,6 +756,10 @@ function bindContentEvents(rerender){
     if(action==="add-task") return openForm({title:"Nový úkol", fields:taskFields(), onSubmit: d=>addItem("tasks", d)});
     if(action==="edit-task") return openForm({title:"Upravit úkol", fields:taskFields(), existing:byId(state.tasks,id), onSubmit: d=>updateItem("tasks", id, d)});
     if(action==="del-task") return confirmDelete("Smazat tento úkol?", ()=>deleteItem("tasks", id));
+    if(action==="toggle-task"){
+      const task = byId(state.tasks,id);
+      return updateItem("tasks", id, {status: task && task.status==='hotovo' ? 'ceka' : 'hotovo'});
+    }
 
     if(action==="add-photo") return openForm({title:"Přidat fotku", fields:photoFields(), onSubmit: d=>addItem("photos", d)});
     if(action==="edit-photo") return openForm({title:"Upravit fotku", fields:photoFields(byId(state.photos,id)), existing:byId(state.photos,id), onSubmit: d=>updateItem("photos", id, d)});
