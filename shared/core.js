@@ -235,8 +235,8 @@ function renderDashboard(){
   const totalTasks = state.tasks.length;
   const now = new Date();
   const monthStr = now.toISOString().slice(0,7);
-  const spentThisMonth = state.financeItems.filter(i=>(i.date||'').startsWith(monthStr) && i.amount<0).reduce((s,i)=>s+Math.abs(i.amount),0);
-  const totalSpent = state.financeItems.filter(i=>i.amount<0).reduce((s,i)=>s+Math.abs(i.amount),0);
+  const spentThisMonth = state.financeItems.filter(i=>(i.date||'').startsWith(monthStr) && i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
+  const totalSpent = state.financeItems.filter(i=>i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
 
   return `
     <div class="hero-tile">
@@ -366,11 +366,11 @@ function docFields(existing){
 /* ================= FINANCE ================= */
 function renderFinance(){
   const filtered = state.financeItems.filter(i=> !financeFilterCat || i.categoryId===financeFilterCat).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const totalCost = state.financeItems.filter(i=>i.amount<0).reduce((s,i)=>s+Math.abs(i.amount),0);
-  const totalIncome = state.financeItems.filter(i=>i.amount>0).reduce((s,i)=>s+i.amount,0);
+  const totalCost = state.financeItems.filter(i=>i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
+  const totalIncome = state.financeItems.filter(i=>i.type==='prijem').reduce((s,i)=>s+Math.abs(i.amount||0),0);
   const budgetTotal = state.budgets.reduce((s,b)=>s+(b.plannedAmount||0),0);
   return `
-    <div class="section-lead">Náklady a příjmy spojené s domem a rekonstrukcí. Záporná částka = náklad, kladná = příjem.</div>
+    <div class="section-lead">Náklady a příjmy spojené s domem a rekonstrukcí.</div>
     <div class="grid grid-3" style="margin-bottom:18px;">
       <div class="card"><div class="item-meta">Celkem náklady</div><div class="display" style="font-size:22px;color:#9B4025;">${fmtMoney(totalCost)}</div></div>
       <div class="card"><div class="item-meta">Celkem příjmy</div><div class="display" style="font-size:22px;color:#3D6B4C;">${fmtMoney(totalIncome)}</div></div>
@@ -393,14 +393,17 @@ function renderFinance(){
     <div class="card">
       ${filtered.length ? filtered.map(i=>{
         const cat = catObj(i.categoryId);
+        const isCost = i.type==='vydaj';
         return `
         <div class="list-item">
+          <div class="doc-icon" style="font-size:16px;">${cat&&cat.icon?cat.icon:'💰'}</div>
           <div class="item-main">
-            <div class="item-title">${cat?`${cat.icon||''} `:''}${esc(i.note || (cat?cat.name:'Položka'))}</div>
-            <div class="item-meta">${fmtDateShort(i.date)}${cat?` · ${esc(cat.name)}`:''}${i.supplierId&&contactName(i.supplierId)?` · ${contactName(i.supplierId)}`:''}${i.roomId&&roomName(i.roomId)?` · ${roomName(i.roomId)}`:''}${i.receipt?` · <a class="link-inline" href="${i.receipt}" target="_blank">doklad</a>`:''}</div>
+            <div class="item-title">${esc(i.name||'Položka')}</div>
+            <div class="item-meta">${fmtDateShort(i.date)}${cat?` · ${esc(cat.name)}`:''}</div>
+            ${i.note?`<div class="item-meta" style="margin-top:2px;">${esc(i.note)}</div>`:''}
           </div>
           <div style="text-align:right;">
-            <div class="${i.amount<0?'amount-neg':'amount-pos'}">${i.amount<0?'−':'+'}${fmtMoney(Math.abs(i.amount))}</div>
+            <div class="${isCost?'amount-neg':'amount-pos'}">${isCost?'−':'+'}${fmtMoney(Math.abs(i.amount||0))}</div>
           </div>
           <div class="item-actions">
             <button class="icon-btn" data-action="edit-finance" data-id="${i.id}">${ICO.edit}</button>
@@ -413,13 +416,14 @@ function renderFinance(){
 }
 function financeFields(){
   return [
+    {key:"name", label:"Název", type:"text", required:true},
     {key:"date", label:"Datum", type:"date", required:true, default:todayISO()},
-    {key:"amount", label:"Částka (mínus = náklad, plus = příjem)", type:"number", required:true, placeholder:"-1500"},
-    {key:"categoryId", label:"Kategorie", type:"select", allowEmpty:true, options:financeCatOptions},
-    {key:"supplierId", label:"Dodavatel / od koho", type:"select", allowEmpty:true, options:contactOptions},
-    {key:"roomId", label:"Místnost", type:"select", allowEmpty:true, options:roomOptions},
     {key:"note", label:"Poznámka", type:"text"},
-    {key:"receipt", label:"Doklad (foto / PDF)", type:"file", accept:"image/*,.pdf"},
+    {key:"type", label:"Typ", type:"select", default:"vydaj", options:[{value:"vydaj",label:"Výdaj"},{value:"prijem",label:"Příjem"}]},
+    {key:"amount", label:"Částka", type:"number", required:true, placeholder:"1500"},
+    {key:"categoryId", label:"Kategorie", type:"select", allowEmpty:true, options:financeCatOptions},
+    {key:"supplierId", label:"Dodavatel / Obchod", type:"select", allowEmpty:true, options:contactOptions},
+    {key:"roomId", label:"Místnost", type:"select", allowEmpty:true, options:roomOptions},
   ];
 }
 function catFields(){
@@ -435,7 +439,7 @@ function renderRozpocet(){
   const rows = state.financeCategories.map(c=>{
     const b = byId(state.budgets, c.id);
     const planned = b ? (b.plannedAmount||0) : 0;
-    const spent = state.financeItems.filter(i=>i.categoryId===c.id && i.amount<0).reduce((s,i)=>s+Math.abs(i.amount),0);
+    const spent = state.financeItems.filter(i=>i.categoryId===c.id && i.type==='vydaj').reduce((s,i)=>s+Math.abs(i.amount||0),0);
     const pct = planned>0 ? Math.min(100,(spent/planned)*100) : (spent>0?100:0);
     const over = planned>0 && spent>planned;
     return {c, planned, spent, pct, over};
@@ -756,13 +760,14 @@ async function handleMaterialSave(data, id){
   else { const ref = await addItem("materials", data); id = ref.id; }
   if(data.bought && !wasBought){
     await addItem("financeItems", {
+      name: "Materiál: " + data.name,
       date: todayISO(),
-      amount: -(Math.abs(data.price)||0),
+      type: "vydaj",
+      amount: Math.abs(data.price)||0,
       categoryId: data.categoryId||"",
       supplierId: "",
       roomId: data.roomId||"",
-      note: "Materiál: " + data.name,
-      receipt: ""
+      note: ""
     });
   }
 }
